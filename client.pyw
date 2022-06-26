@@ -4,6 +4,7 @@ from typing import final, Optional, Callable, Literal
 
 from tkinter import *
 from tkinter import Label as TkLabel
+from tkinter.filedialog import asksaveasfilename
 from tkinter.ttk import *
 from tkinter import messagebox
 
@@ -385,7 +386,7 @@ class Radiobutton(Widget, Radiobutton): ...
 class Checkbutton(Widget, Checkbutton): ...
 
 class Interface(Tk):
-    def __init__(self, server: bool):
+    def __init__(self, server: bool, x: int, y: int):
         super().__init__()
         self.server = server
         self.wm_withdraw()
@@ -393,10 +394,13 @@ class Interface(Tk):
         self.__initialize_variables()
         
         self.__client = None
+
+        self.height = 427
+        self.width = 237
         
-        self.wm_geometry("427x250")
-        self.wm_minsize(width=427, height=250)
-        self.wm_maxsize(width=427, height=250)
+        self.wm_geometry(f"{self.height}x{self.width}+{x}+{y}")
+        self.wm_minsize(width=self.height, height=self.width)
+        self.wm_maxsize(width=self.height, height=self.width)
         self.wm_title("Server" if server else "Client")
         self.wm_resizable(False, False)
         
@@ -439,11 +443,9 @@ class Interface(Tk):
         help.add_command(label="About")
         menubar.add_cascade(label="Help", menu=help)
             
-        self.config(menu=menubar)
+        # self.config(menu=menubar)
 
         self.bind("<Return>", lambda *args, **kwargs: self.send_message())
-        
-        
         
     @property
     def client(self) -> socket.socket:
@@ -472,6 +474,7 @@ class Interface(Tk):
         self.chatbox.insert(END, f"{self.name if hasattr(self, 'name') and self.name else 'You'}: ", "author")
         self.chatbox.insert(END, f"{self.entry.get()}\n", "message")
         self.chatbox.configure(state=DISABLED)
+        self.chatbox.see(END)
         self.entry.delete(0, END)
         
     def change_username(self):
@@ -498,44 +501,63 @@ class Interface(Tk):
         self.messageVar = StringVar()
 
 class Server:
-    def __init__(self):
+    def __init__(self, x: int = None, y: int = None):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.names: dict[str, str] = {}
         
         self.input = Tk()
-        self.input.wm_geometry("283x113")
-        self.input.wm_title("YCT")
         self.input.wm_resizable(False, False)
-        self.input.wm_minsize(width=283, height=113)
-        self.input.wm_maxsize(width=283, height=113)
-        
-        self.menu()
+        self.input.wm_iconbitmap("icon.ico")
+        self.menu(x, y)
         
         self.input.protocol("WM_DELETE_WINDOW", lambda: exit(1))
         
         self.input.mainloop()
     
-    def menu(self):
+    def menu(self, x: int = None, y: int = None):
         for child in self.input.winfo_children():
             child.destroy()
-        self.input.wm_geometry("283x113")
-        self.input.wm_minsize(width=283, height=113)
-        self.input.wm_maxsize(width=283, height=113)
+        self.input.wm_title("Main menu")
+        self.input.wm_geometry("283x173" if not x else f"283x173+{x}+{y}")
+        self.input.wm_minsize(width=283, height=173)
+        self.input.wm_maxsize(width=283, height=173)
 
         optionFrame = Frame(self.input)
         
         host_button = Button(optionFrame, text="Host", width=16, takefocus=0, command=self.host)
         conn_button = Button(optionFrame, text="Connect", width=16, takefocus=0, command=self.connect)
+        sett_button = Button(optionFrame, text="Settings", width=16, takefocus=0, command=self.settings)
         
         host_button.grid(row=0, column=0, pady=2)
         conn_button.grid(row=1, column=0, pady=2)
+        sett_button.grid(row=2, column=0, pady=2)
         
         optionFrame.place(relx=0.5, rely=0.5, anchor=CENTER)
+        title = Label(self.input, text="CommuSocket", font=("Lato-Thin", 14))
+        title.pack(side=TOP, pady=13)
+        copyright = Label(self.input, text="Copyright © 2017-2022 Yılmaz Alpaslan", font=("Segoe UI", 8), foreground="gray")
+        copyright.pack(side=BOTTOM)
+
+    def settings(self):
+        for child in self.input.winfo_children():
+            child.destroy()
+
+        self.input.wm_title("Settings")
+        self.input.wm_geometry("283x173")
+        self.input.wm_minsize(width=283, height=173)
+        self.input.wm_maxsize(width=283, height=173)
+
+        apply_button = Button(self.input, text="Apply", width=16, takefocus=0)
+        back_button = Button(self.input, text="Back", width=12, takefocus=0, command=self.menu)
+
+        apply_button.place(x=9, y=138)
+        back_button.place(x=121, y=138)
 
     def host(self):
         for child in self.input.winfo_children():
             child.destroy()
-            
+        
+        self.input.wm_title("Host")
         self.input.wm_geometry("283x73")
         self.input.wm_minsize(width=283, height=73)
         self.input.wm_maxsize(width=283, height=73)
@@ -552,8 +574,8 @@ class Server:
             except:
                 messagebox.showerror("Invalid port number", "A port number can only be a number from 0 to 65535.")
                 return
-            self.sock.bind(('192.168.0.100', self.port))
-            self.root = Interface(server=True)
+            self.sock.bind((socket.gethostbyname(socket.gethostname()), self.port))
+            self.root = Interface(server=True, x=self.input.winfo_x(), y=self.input.winfo_y())
             self.root.server = self
             self.root.client = self.sock
             if name_entry.get():
@@ -577,6 +599,7 @@ class Server:
     def connect(self):
         for child in self.input.winfo_children():
             child.destroy()
+        self.input.wm_title("Connect")
         self.input.wm_geometry("283x113")
         self.input.wm_minsize(width=283, height=113)
         self.input.wm_maxsize(width=283, height=113)
@@ -612,7 +635,7 @@ class Server:
             except ConnectionRefusedError:
                 messagebox.showerror("Target unreachable", "The person you're trying to contact is currently unreachable. Either enter another IP address or port number, or try again later.")
             else:
-                self.root = Interface(server=False)
+                self.root = Interface(server=False, x=self.input.winfo_x(), y=self.input.winfo_y())
                 self.root.name = name_entry.get()
                 self.root.server = self
                 self.root.client = self.sock
@@ -644,16 +667,26 @@ class Server:
         self.root.chatbox.configure(state=NORMAL)
         self.root.chatbox.insert(END, f"Connected to {self.names.get(':'.join([self.ip, str(self.port)]), ':'.join([self.ip, str(self.port)]))}.\n", "connection")
         self.root.chatbox.configure(state=DISABLED)
+        self.root.chatbox.see(END)
         while True:
             try:
                 data = self.sock.recv(1024)
             except ConnectionResetError:
-                self.root.entry.configure(state=DISABLED)
-                self.root.sendButton.configure(state=DISABLED)
+                self.root: Interface
                 self.root.statusBar.configure(text="Status: Not connected")
                 self.root.chatbox.configure(state=NORMAL)
                 self.root.chatbox.insert(END, f"Connection to {self.names.get(':'.join([self.ip, str(self.port)]), ':'.join([self.ip, str(self.port)]))} has been lost.\n", "connection")
                 self.root.chatbox.configure(state=DISABLED)
+                self.root.chatbox.see(END)
+                self.root.entry.place_forget()
+                self.root.sendButton.place_forget()
+                def save_chat():
+                    with open(asksaveasfilename(defaultextension="*.txt", filetypes=[("Text Document", "*.txt")]), mode="w", encoding="utf-8") as file:
+                        file.write(self.root.chatbox.get("1.0", END))
+                self.root.saveChat = Button(self.root, text="Save the chat", width=21, takefocus=0, command=save_chat)
+                self.root.closeButton = Button(self.root, text="Exit", takefocus=0, width=15, command=lambda: [self.__init__(self.root.winfo_x(), [self.root.winfo_y(), self.root.destroy()][0]), None][2])
+                self.root.saveChat.place(x=9, y=183)
+                self.root.closeButton.place(x=316, y=183)
                 return
             if data.startswith(b"!&registername|"):
                 self.names[':'.join([self.ip, str(self.port)])] = data.split(b"|")[1].decode("utf-8")
@@ -663,6 +696,7 @@ class Server:
                 self.root.chatbox.insert(END, f"{self.names[':'.join([self.ip, str(self.port)])] if ':'.join([self.ip, str(self.port)]) in self.names else ':'.join([self.ip, str(self.port)])}: ", "author")
                 self.root.chatbox.insert(END, f"{data.decode('utf-8')}\n", "message")
                 self.root.chatbox.configure(state=DISABLED)
+                self.root.chatbox.see(END)
             else:
                 pass
             
@@ -681,6 +715,7 @@ class Server:
         self.root.chatbox.configure(state=NORMAL)
         self.root.chatbox.insert(END, f"Connected to {self.names.get(':'.join([address[0], str(address[1])]), ':'.join([address[0], str(address[1])]))}.\n", "connection")
         self.root.chatbox.configure(state=DISABLED)
+        self.root.chatbox.see(END)
         if hasattr(self.root, 'name') and self.root.name:
             client.send(b"!&registername|" + self.root.name.encode("utf-8"))
         while True:
@@ -695,6 +730,7 @@ class Server:
                 self.root.chatbox.configure(state=NORMAL)
                 self.root.chatbox.insert(END, f"Connection to {self.names.get(':'.join([address[0], str(address[1])]), ':'.join([address[0], str(address[1])]))} has been lost.\n", "connection")
                 self.root.chatbox.configure(state=DISABLED)
+                self.root.chatbox.see(END)
                 return
             if data:
                 if data.startswith(b"!&registername|"):
@@ -704,6 +740,7 @@ class Server:
                 self.root.chatbox.insert(END, f"{self.names[':'.join([address[0], str(address[1])])] if ':'.join([address[0], str(address[1])]) in self.names else ':'.join([address[0], str(address[1])])}: ", "author")
                 self.root.chatbox.insert(END, f"{data.decode('utf-8')}\n", "message")
                 self.root.chatbox.configure(state=DISABLED)
+                self.root.chatbox.see(END)
             else:
                 pass
 
