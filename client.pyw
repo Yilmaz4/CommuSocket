@@ -1,6 +1,6 @@
 import socket, threading, multipledispatch, functools, inspect, os, signal
 
-from typing import final, Optional, Callable, Literal
+from typing import final, Optional, Callable, Literal, Union
 
 from tkinter import *
 from tkinter import Label as TkLabel
@@ -386,9 +386,11 @@ class Radiobutton(Widget, Radiobutton): ...
 class Checkbutton(Widget, Checkbutton): ...
 
 class Interface(Tk):
-    def __init__(self, server: bool, x: int, y: int):
+    def __init__(self, server: bool, x: int, y: int, options: dict[str, Union[str, int, bool]], name: str = None):
         super().__init__()
         self.server = server
+        self.options = options
+        self.name = name
         self.wm_withdraw()
         self.__initialize_protocols()
         self.__initialize_variables()
@@ -401,7 +403,8 @@ class Interface(Tk):
         self.wm_geometry(f"{self.height}x{self.width}+{x}+{y}")
         self.wm_minsize(width=self.height, height=self.width)
         self.wm_maxsize(width=self.height, height=self.width)
-        self.wm_title("Server" if server else "Client")
+        self.wm_title(self.name + " (Server)" if server else " (Client)")
+        self.wm_iconbitmap("icon.ico")
         self.wm_resizable(False, False)
         
         self.chatbox = ScrolledText(self, width=48, height=10, state=DISABLED, bg="white", relief=FLAT, takefocus=0, highlightbackground="#7a7a7a", highlightthickness=1, highlightcolor="#7a7a7a")
@@ -498,12 +501,16 @@ class Interface(Tk):
     def __initialize_protocols(self):
         self.protocol("WM_DELETE_WINDOW", lambda: os.kill(os.getpid(), signal.SIGTERM))
     def __initialize_variables(self):
+        self.alwaysShowIP = IntVar(value=0)
+        for key, value in self.options.items():
+            exec(f"self.{key}.set(" + (str(value) if isinstance(value, int) else f"\"{value}\"") + ")")
         self.messageVar = StringVar()
 
 class Server:
     def __init__(self, x: int = None, y: int = None):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.names: dict[str, str] = {}
+        self.options: dict[str, Union[str, int, bool]] = {}
         
         self.input = Tk()
         self.input.wm_resizable(False, False)
@@ -521,6 +528,8 @@ class Server:
         self.input.wm_geometry("283x173" if not x else f"283x173+{x}+{y}")
         self.input.wm_minsize(width=283, height=173)
         self.input.wm_maxsize(width=283, height=173)
+
+        self.alwaysShowIP = IntVar(value=0)
 
         optionFrame = Frame(self.input)
         
@@ -543,15 +552,40 @@ class Server:
             child.destroy()
 
         self.input.wm_title("Settings")
-        self.input.wm_geometry("283x173")
-        self.input.wm_minsize(width=283, height=173)
-        self.input.wm_maxsize(width=283, height=173)
+        self.input.wm_geometry("283x70")
+        self.input.wm_minsize(width=283, height=70)
+        self.input.wm_maxsize(width=283, height=70)
 
-        apply_button = Button(self.input, text="Apply", width=16, takefocus=0)
+        def getSettings(raw: bool = False) -> list[tuple[str, IntVar | StringVar]]:
+            return [
+                (attr[0], attr[1] if raw else attr[1].get()) for attr in
+                [a for a in inspect.getmembers(self, lambda a: not(inspect.isroutine(a))) if not(a[0].startswith('__') and a[0].endswith('__')) and isinstance(a[1], (IntVar, StringVar))]
+            ]
+        current = getSettings()
+        
+        def apply():
+            nonlocal current
+            current = getSettings()
+            apply_button.configure(state=DISABLED)
+            self.options = {key: value for (key, value) in getSettings()}
+
+        always_display_ip = Checkbutton(self.input, text="Always display IP", variable=self.alwaysShowIP, onvalue=1, offvalue=0, command=lambda: apply_button.configure(state=NORMAL if current != getSettings() else DISABLED), takefocus=0)
+
+        apply_button = Button(self.input, text="Apply", width=16, state=DISABLED, command=apply, takefocus=0)
         back_button = Button(self.input, text="Back", width=12, takefocus=0, command=self.menu)
 
-        apply_button.place(x=9, y=138)
-        back_button.place(x=121, y=138)
+        always_display_ip.place(x=9, y=9)
+        apply_button.place(x=9, y=35)
+        back_button.place(x=121, y=35)
+    
+    @staticmethod
+    def get_localIP() -> str:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        try:
+            return s.getsockname()[0]
+        finally:
+            s.close()
 
     def host(self):
         for child in self.input.winfo_children():
@@ -574,12 +608,10 @@ class Server:
             except:
                 messagebox.showerror("Invalid port number", "A port number can only be a number from 0 to 65535.")
                 return
-            self.sock.bind((socket.gethostbyname(socket.gethostname()), self.port))
-            self.root = Interface(server=True, x=self.input.winfo_x(), y=self.input.winfo_y())
+            self.sock.bind((self.get_localIP(), self.port))
+            self.root = Interface(server=True, x=self.input.winfo_x(), y=self.input.winfo_y(), options=self.options, name=name_entry.get())
             self.root.server = self
             self.root.client = self.sock
-            if name_entry.get():
-                self.root.name = name_entry.get()
             self.input.destroy()
             threading.Thread(target = self.listen_server).start()
             self.root.mainloop()
@@ -635,13 +667,11 @@ class Server:
             except ConnectionRefusedError:
                 messagebox.showerror("Target unreachable", "The person you're trying to contact is currently unreachable. Either enter another IP address or port number, or try again later.")
             else:
-                self.root = Interface(server=False, x=self.input.winfo_x(), y=self.input.winfo_y())
-                self.root.name = name_entry.get()
+                self.root = Interface(server=False, x=self.input.winfo_x(), y=self.input.winfo_y(), options=self.options, name=name_entry.get())
                 self.root.server = self
                 self.root.client = self.sock
                 self.input.destroy()
-                if hasattr(self, 'name') and self.name:
-                    self.sock.send(b"!&registername|" + self.name.encode("utf-8"))
+                self.sock.send(b"!&registername|" + self.name.encode("utf-8") if hasattr(self, 'name') and self.name else b"")
                 threading.Thread(target = self.listen_client).start()
                 self.root.mainloop()
         
@@ -660,14 +690,18 @@ class Server:
         connectButton.place(x=10, y=77)
         backButton.place(x=208, y=77)
 
+    def format_name(self, ip: str, port: int, include_ip: bool = False) -> str:
+        return ':'.join([ip, str(port)]) if self.root.alwaysShowIP.get() else (self.names[':'.join([ip, str(port)])] + (f" ({':'.join([ip, str(port)])})" if include_ip else "")) if ''.join(self.names[':'.join([ip, str(port)])].split()) != '' else ':'.join([ip, str(port)])
+
     def listen_client(self) -> Optional[bool]:
+        def displayServerInfo(*args, **kwargs):
+            self.root.statusBar.configure(text="Status: Connected to " + self.format_name(self.ip, self.port, True))
+            self.root.chatbox.configure(state=NORMAL)
+            self.root.chatbox.insert(END, f"Successfuly connected to {self.format_name(self.ip, self.port)}.\n", "connection")
+            self.root.chatbox.configure(state=DISABLED)
+            self.root.chatbox.see(END)
         self.root.entry.configure(state=NORMAL)
         self.root.sendButton.configure(state=NORMAL)
-        self.root.statusBar.configure(text="Status: Connected to " + self.names.get(':'.join([self.ip, str(self.port)]), ':'.join([self.ip, str(self.port)])))
-        self.root.chatbox.configure(state=NORMAL)
-        self.root.chatbox.insert(END, f"Connected to {self.names.get(':'.join([self.ip, str(self.port)]), ':'.join([self.ip, str(self.port)]))}.\n", "connection")
-        self.root.chatbox.configure(state=DISABLED)
-        self.root.chatbox.see(END)
         while True:
             try:
                 data = self.sock.recv(1024)
@@ -675,7 +709,7 @@ class Server:
                 self.root: Interface
                 self.root.statusBar.configure(text="Status: Not connected")
                 self.root.chatbox.configure(state=NORMAL)
-                self.root.chatbox.insert(END, f"Connection to {self.names.get(':'.join([self.ip, str(self.port)]), ':'.join([self.ip, str(self.port)]))} has been lost.\n", "connection")
+                self.root.chatbox.insert(END, f"Connection to {self.format_name(self.ip, self.port)} has been lost.\n", "connection")
                 self.root.chatbox.configure(state=DISABLED)
                 self.root.chatbox.see(END)
                 self.root.entry.place_forget()
@@ -689,11 +723,15 @@ class Server:
                 self.root.closeButton.place(x=316, y=183)
                 return
             if data.startswith(b"!&registername|"):
-                self.names[':'.join([self.ip, str(self.port)])] = data.split(b"|")[1].decode("utf-8")
+                if ''.join(data.replace(b"!&registername|", b"").decode("utf-8").split()) != '':
+                    self.names[':'.join([self.ip, str(self.port)])] = data.split(b"|")[1].decode("utf-8")
+                displayServerInfo()
+                continue
+            elif data.startswith(b"!&keepalive"):
                 continue
             if data:
                 self.root.chatbox.configure(state=NORMAL)
-                self.root.chatbox.insert(END, f"{self.names[':'.join([self.ip, str(self.port)])] if ':'.join([self.ip, str(self.port)]) in self.names else ':'.join([self.ip, str(self.port)])}: ", "author")
+                self.root.chatbox.insert(END, f"{self.format_name(self.ip, self.port)}: ", "author")
                 self.root.chatbox.insert(END, f"{data.decode('utf-8')}\n", "message")
                 self.root.chatbox.configure(state=DISABLED)
                 self.root.chatbox.see(END)
@@ -702,22 +740,28 @@ class Server:
             
     def listen_server(self):
         self.sock.listen(5)
+        print("listening at", self.get_localIP())
         while True:
             client, address = self.sock.accept()
+            print("connected")
             self.root.client = client
             client.settimeout(60)
             threading.Thread(target=self.listenToClient, args=(client, address)).start()
 
     def listenToClient(self, client: socket.socket, address: tuple[str, int]) -> Optional[bool]:
+        def keepConnectionAlive(*args, **kwargs):
+            client.send(b"!&keepalive")
+            self.root.after(5000, keepConnectionAlive)
+        def displayClientInfo(*args, **kwargs):
+            self.root.statusBar.configure(text="Status: Connected to " + self.format_name(address[0], address[1], True))
+            self.root.chatbox.configure(state=NORMAL)
+            self.root.chatbox.insert(END, f"Successfully connected to {self.format_name(address[0], address[1])}.\n", "connection")
+            self.root.chatbox.configure(state=DISABLED)
+            self.root.chatbox.see(END)
+            self.root.after(5000, keepConnectionAlive)
         self.root.entry.configure(state=NORMAL)
         self.root.sendButton.configure(state=NORMAL)
-        self.root.statusBar.configure(text="Status: Connected to " + self.names.get(':'.join([address[0], str(address[1])]), ':'.join([address[0], str(address[1])])))
-        self.root.chatbox.configure(state=NORMAL)
-        self.root.chatbox.insert(END, f"Connected to {self.names.get(':'.join([address[0], str(address[1])]), ':'.join([address[0], str(address[1])]))}.\n", "connection")
-        self.root.chatbox.configure(state=DISABLED)
-        self.root.chatbox.see(END)
-        if hasattr(self.root, 'name') and self.root.name:
-            client.send(b"!&registername|" + self.root.name.encode("utf-8"))
+        client.send(b"!&registername|" + self.root.name.encode("utf-8") if hasattr(self.root, 'name') and self.root.name else b"")
         while True:
             try:
                 data = client.recv(1024)
@@ -728,16 +772,18 @@ class Server:
                 self.root.sendButton.configure(state=DISABLED)
                 self.root.statusBar.configure(text="Status: Not connected")
                 self.root.chatbox.configure(state=NORMAL)
-                self.root.chatbox.insert(END, f"Connection to {self.names.get(':'.join([address[0], str(address[1])]), ':'.join([address[0], str(address[1])]))} has been lost.\n", "connection")
+                self.root.chatbox.insert(END, f"Connection to {self.format_name(address[0], address[1])} has been lost.\n", "connection")
                 self.root.chatbox.configure(state=DISABLED)
                 self.root.chatbox.see(END)
                 return
             if data:
                 if data.startswith(b"!&registername|"):
-                    self.names[':'.join([address[0], str(address[1])])] = data.split(b"|")[1].decode("utf-8")
+                    if ''.join(data.replace(b"!&registername|", b"").decode("utf-8").split()) != '':
+                        self.names[':'.join([address[0], str(address[1])])] = data.split(b"|")[1].decode("utf-8")
+                    displayClientInfo()
                     continue
                 self.root.chatbox.configure(state=NORMAL)
-                self.root.chatbox.insert(END, f"{self.names[':'.join([address[0], str(address[1])])] if ':'.join([address[0], str(address[1])]) in self.names else ':'.join([address[0], str(address[1])])}: ", "author")
+                self.root.chatbox.insert(END, f"{self.format_name(address[0], address[1])}: ", "author")
                 self.root.chatbox.insert(END, f"{data.decode('utf-8')}\n", "message")
                 self.root.chatbox.configure(state=DISABLED)
                 self.root.chatbox.see(END)
