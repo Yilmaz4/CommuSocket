@@ -3,7 +3,9 @@ from tkinter import Label as TkLabel
 from tkinter.ttk import *
 from tkinter import messagebox
 
+from typing import *
 from commusocket import Server, Address, Message
+from requests import get
 
 import socket, pickle, time
 
@@ -99,6 +101,19 @@ class Interface(Tk):
         self.main_menu()
 
         self.mainloop()
+    
+    def wait_for_response(self):
+        while True:
+            try:
+                data = self.socket.recv(10)
+            except TimeoutError:
+                continue
+            except ConnectionResetError:
+                return False
+            if data and data.startswith(b"SUCCESS"):
+                return True
+            else:
+                return None
 
     def main_menu(self):
         for child in self.winfo_children():
@@ -106,6 +121,8 @@ class Interface(Tk):
         self.wm_title("CommuSocket")
         self.wm_minsize(width=283, height=173)
         self.wm_maxsize(width=283, height=173)
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         optionFrame = Frame(self)
         
@@ -124,7 +141,6 @@ class Interface(Tk):
         copyright.pack(side=BOTTOM)
 
     def create_server(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         for child in self.winfo_children():
             child.destroy()
         self.wm_title("Create Server")
@@ -139,21 +155,14 @@ class Interface(Tk):
                 self.socket.connect(("94.54.96.223", 2422))
             except OSError:
                 pass
-            self.socket.send(b"CREATE_SERVER|" + pickle.dumps({
+            self.socket.send(b"CREATE_SERVER/" + pickle.dumps({
                 "name": name_entry.get(),
                 "capacity": capacity_entry.get(),
                 "password": password_entry.get()
             }))
-            while True:
-                try:
-                    data = self.socket.recv(1024)
-                except TimeoutError:
-                    continue
-                except ConnectionResetError:
-                    return
-                if data and data.startswith(b"SUCCESS"):
-                    messagebox.showinfo("Server creation successful", f"A server named {name_entry.get()} with a capacity of {capacity_entry.get()} has been successfully created!")
-                    return
+            if self.wait_for_response():
+                messagebox.showinfo("Server creation successful", f"A server named {name_entry.get()} with a capacity of {capacity_entry.get()} has been successfully created!")
+                self.main_menu()
 
         name_var = StringVar()
         capacity_var = DoubleVar(value=10)
@@ -180,7 +189,7 @@ class Interface(Tk):
         back_button.place(x=172, y=88)
 
     def join_server(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.servers = []
         for child in self.winfo_children():
             child.destroy()
         self.wm_title("Join Server")
@@ -206,13 +215,10 @@ class Interface(Tk):
         minwidth = tree.column('password', option='minwidth')
         tree.column('password', width=minwidth)
 
-        def handle_click(event):
-            if tree.identify_region(event.x, event.y) == "separator":
-                if tree.identify_column(event.x) == '#0':
-                    return "break"
+        def on_select(event):
+            connect_button.configure(state=NORMAL)
 
-        tree.bind('<Button-1>', handle_click)
-        tree.bind('<Motion>', handle_click)
+        tree.bind("<<TreeviewSelect>>", on_select)
 
         tree.place_configure(x=9, y=9, height=210, width=470)
 
@@ -222,7 +228,7 @@ class Interface(Tk):
 
         def refresh():
             try:
-                self.socket.connect(("94.54.96.223", 2422))
+                self.socket.connect((get('https://api.ipify.org').content.decode('utf8'), 2422))
             except OSError:
                 tree.delete(*tree.get_children())
                 refresh_button.configure(state=DISABLED)
@@ -235,7 +241,7 @@ class Interface(Tk):
                     self.after(1000, set_refresh_button_state)
                 except Exception:
                     pass
-            self.socket.send(b"GET_SERVERS")
+            self.socket.send(b"GET_MASTERLIST")
             while True:
                 try:
                     data = self.socket.recv(1024)
@@ -243,12 +249,17 @@ class Interface(Tk):
                     continue
                 except ConnectionResetError:
                     return
-                servers: list[Server] = pickle.loads(data)
+                self.servers: List[Server] = pickle.loads(data)
                 break
-            for server in servers:
-                tree.insert('', END, values=(server.name, server.owner, len(server.users), server.capacity, bool(server.password)))
+            for server in self.servers:
+                tree.insert('', END, values=(server.name, server.owner, len(server.users), server.capacity, "Present" if bool(server.password) else "None"))
 
-        connect_button = Button(self, text="Join", width=17, takefocus=0, state=DISABLED)
+        def connect():
+            self.socket.send(b"JOIN_SERVER/" + pickle.dumps(self.servers[int(tree.selection()[0][1:])]))
+            if self.wait_for_response():
+                self.in_server()
+
+        connect_button = Button(self, text="Join", width=17, takefocus=0, state=DISABLED, command=connect)
         refresh_button = Button(self, text="Refresh", width=14, takefocus=0, command=refresh)
         direct_button = Button(self, text="Direct Join", width=17, takefocus=0)
         back_button = Button(self, text="Back", width=15, takefocus=0, command=self.main_menu)
@@ -261,7 +272,6 @@ class Interface(Tk):
         back_button.place(x=396, y=226)
 
     def in_server(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         for child in self.winfo_children():
             child.destroy()
         self.wm_title("CommuSocket")
